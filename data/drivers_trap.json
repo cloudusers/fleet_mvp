@@ -1,0 +1,32 @@
+[
+  {
+    "did": "D2",
+    "name": "佐藤",
+    "plate": "大阪500あ22-22",
+    "status": "idle",
+    "current_kind": null,
+    "current_gid": null,
+    "lat": 34.6639,
+    "lon": 135.5019,
+    "free_at": "2026-09-20T08:00:00",
+    "note": "人在难波，紧单只有他赶得上",
+    "on_shift": true,
+    "shift_start": "2026-09-20T08:00:00",
+    "shift_end": "2026-09-20T21:00:00"
+  },
+  {
+    "did": "D5",
+    "name": "伊藤",
+    "plate": "大阪500あ55-55",
+    "status": "idle",
+    "current_kind": null,
+    "current_gid": null,
+    "lat": 34.7335,
+    "lon": 135.5002,
+    "free_at": "2026-09-20T08:00:00",
+    "note": "人在新大阪，松单能接，紧单赶不上",
+    "on_shift": true,
+    "shift_start": "2026-09-20T08:00:00",
+    "shift_end": "2026-09-20T21:00:00"
+  }
+]
