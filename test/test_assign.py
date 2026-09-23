@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from datetime import datetime
 
 import tempfile
@@ -164,6 +165,18 @@ class AssignTests(unittest.TestCase):
         pairs = [(a, b, km) for a, b, km in _pair_empties(sol, "from_station", "to_station") if {a, b} == {"J01", "G11"}]
         self.assertTrue(pairs)
         self.assertLess(pairs[0][2], 0.2)
+
+    def test_duplicate_group_or_driver_is_rejected(self):
+        drivers, groups = default_dataset()
+        with self.assertRaises(ValueError):
+            greedy_assign(drivers, [groups[0], groups[0]])
+        with self.assertRaises(ValueError):
+            greedy_assign([drivers[0], drivers[0]], groups[:1])
+        busy = dict(current_gid=groups[0].gid, status="enroute", dest_lat=34.66, dest_lon=135.50)
+        first = replace(drivers[0], **busy)
+        second = replace(drivers[1], **busy)
+        with self.assertRaises(ValueError):
+            greedy_assign([first, second], [groups[0]])
 
 
 if __name__ == "__main__":

@@ -6,13 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import List, Optional, Sequence, Tuple
 
-from fleet_mvp.config import (
-    DROPOFF_DWELL_MIN,
-    PICKUP_DWELL_MIN,
-    PREP_BUFFER_MIN,
-    STATION_LOAD_MIN,
-    TRANSFER_STATION,
-)
+from fleet_mvp.config import PREP_BUFFER_MIN, TRANSFER_STATION
 from fleet_mvp.geo import add_minutes, detour_km, haversine_km, near_transfer, travel_minutes
 from fleet_mvp.models import Driver, DriverPlan, DriverSim, Group, GroupExecution, Solution, SolutionSim, Stop
 
@@ -61,8 +55,8 @@ class _Walk:
     loaded_min: float = 0.0
 
 
-def _walk_guest_stops(stops: Sequence[Stop], arrive_first: datetime, dwell_min: float) -> _Walk:
-    # 站序固定。任一站破 late，整组失败。
+def _walk_guest_stops(stops: Sequence[Stop], arrive_first: datetime, action: str) -> _Walk:
+    # 站序固定。预估时刻已经含上下车，这里不再加停靠。任一站破 late，整组失败。
     if not stops:
         return _Walk(feasible=False, reason="空分组")
     wait_sum = delay_sum = 0.0
@@ -76,15 +70,13 @@ def _walk_guest_stops(stops: Sequence[Stop], arrive_first: datetime, dwell_min: 
             loaded_km += haversine_km(lat, lon, stop.lat, stop.lon)
             t = add_minutes(t, travel_minutes(lat, lon, stop.lat, stop.lon))
         if t > stop.late:
-            kind = "接客" if dwell_min == PICKUP_DWELL_MIN else "送达"
             where = "首站" if i == 0 else "途经"
-            return _Walk(feasible=False, reason=f"赶不上{where}{kind} {stop.oid}")
+            return _Walk(feasible=False, reason=f"赶不上{where}{action} {stop.oid}")
         wait, delay, slack = _windows(t, stop)
         wait_sum += wait
         delay_sum += delay
         slacks.append(slack)
         t = max(t, stop.eta)
-        t = add_minutes(t, dwell_min)
         lat, lon = stop.lat, stop.lon
     return _Walk(
         feasible=True,
@@ -145,7 +137,7 @@ def execute_to_station(
 
     def _ok(depart: datetime) -> bool:
         return _walk_guest_stops(
-            group.stops, add_minutes(depart, empty_min), PICKUP_DWELL_MIN
+            group.stops, add_minutes(depart, empty_min), "接客"
         ).feasible
 
     if need_latest:
@@ -156,20 +148,22 @@ def execute_to_station(
         latest_depart = None
     ideal_depart = add_minutes(first.eta, -empty_min)
     depart = free_at if policy == "immediate" else max(free_at, ideal_depart)
+    # 决策时刻已经过了建议出发，不能按过去的时刻发车。
+    if now is not None and depart < now:
+        depart = now
     if need_latest and not _ok(depart):
         return _fail("出发后仍赶不上本组全程接客", latest_depart)
 
     arrive = add_minutes(depart, empty_min)
-    walked = _walk_guest_stops(group.stops, arrive, PICKUP_DWELL_MIN)
+    walked = _walk_guest_stops(group.stops, arrive, "接客")
     if not walked.feasible:
         return _fail(walked.reason, latest_depart)
 
     tlat, tlon = TRANSFER_STATION
     to_t = travel_minutes(walked.end_lat, walked.end_lon, tlat, tlon)
-    arrive_transfer = add_minutes(walked.end_at, to_t)
-    end_at = add_minutes(arrive_transfer, DROPOFF_DWELL_MIN)
+    end_at = add_minutes(walked.end_at, to_t)
     extra = 0.0 if near_transfer(olat, olon) else detour_km(olat, olon, first.lat, first.lon)
-    loaded_min = walked.loaded_min + to_t + DROPOFF_DWELL_MIN
+    loaded_min = walked.loaded_min + to_t
     return GroupExecution(
         feasible=True,
         depart=depart,
@@ -206,35 +200,33 @@ def execute_from_station(
     empty_km = haversine_km(olat, olon, tlat, tlon)
     first = group.first
     to_first = travel_minutes(tlat, tlon, first.lat, first.lon)
-    ideal_leave_t = add_minutes(first.eta, -to_first - STATION_LOAD_MIN)
+    ideal_leave_t = add_minutes(first.eta, -to_first)
 
     if need_latest:
         def _from_origin(origin_depart: datetime) -> _Walk:
             arrive_t = add_minutes(origin_depart, empty_min)
-            leave_t = add_minutes(arrive_t, STATION_LOAD_MIN)
             return _walk_guest_stops(
-                group.stops, add_minutes(leave_t, to_first), DROPOFF_DWELL_MIN
+                group.stops, add_minutes(arrive_t, to_first), "送达"
             )
 
         lo = free_at - timedelta(hours=2)
-        hi = add_minutes(first.late, -to_first - STATION_LOAD_MIN - empty_min)
+        hi = add_minutes(first.late, -to_first - empty_min)
         latest_depart = _latest_ok(lambda d: _from_origin(d).feasible, lo, hi)
     else:
         latest_depart = None
 
     if policy == "immediate":
         depart = free_at
-        arrive_t = add_minutes(depart, empty_min)
-        leave_ready = arrive_t
     else:
         need_leave_origin = add_minutes(ideal_leave_t, -empty_min)
         depart = max(free_at, need_leave_origin)
-        arrive_t = add_minutes(depart, empty_min)
-        leave_ready = max(arrive_t, ideal_leave_t)
+    if now is not None and depart < now:
+        depart = now
+    arrive_t = add_minutes(depart, empty_min)
+    leave_ready = arrive_t if policy == "immediate" else max(arrive_t, ideal_leave_t)
 
-    leave_t = add_minutes(leave_ready, STATION_LOAD_MIN)
-    arrive = add_minutes(leave_t, to_first)
-    walked = _walk_guest_stops(group.stops, arrive, DROPOFF_DWELL_MIN)
+    arrive = add_minutes(leave_ready, to_first)
+    walked = _walk_guest_stops(group.stops, arrive, "送达")
     if not walked.feasible:
         return _fail(walked.reason, latest_depart)
 
@@ -248,7 +240,7 @@ def execute_from_station(
         eta_delay_min=walked.delay_min,
         slack_min=walked.slack_min,
         stop_slacks=walked.slacks,
-        loaded_min=STATION_LOAD_MIN + walked.loaded_min,
+        loaded_min=walked.loaded_min,
         empty_min=empty_min,
         empty_km=empty_km,
         detour_km=0.0,

@@ -90,7 +90,8 @@ _EXE_CACHE: dict = {}
 
 
 def _cached_execute(group: Group, lat: float, lon: float, free_at: datetime, driver: Driver, now: Optional[datetime]):
-    key = (id(group), driver.did, lat, lon, free_at, now)
+    # 用司机对象本身做键。电话相同但班次不同的两条记录不能共用一次模拟。
+    key = (id(group), id(driver), lat, lon, free_at, now)
     hit = _EXE_CACHE.get(key)
     if hit is not None:
         return hit
@@ -233,7 +234,27 @@ def _seed_locked(drivers: Sequence[Driver], groups: Sequence[Group]) -> Tuple[So
     return sol, rest
 
 
+def _require_unique(drivers: Sequence[Driver], groups: Sequence[Group]) -> None:
+    gids = [g.gid for g in groups]
+    dup_gids = sorted({gid for gid in gids if gids.count(gid) > 1})
+    if dup_gids:
+        raise ValueError("配车单号重复：" + "、".join(dup_gids))
+    dids = [d.did for d in drivers]
+    dup_dids = sorted({did for did in dids if dids.count(did) > 1})
+    if dup_dids:
+        raise ValueError("司机身份重复：" + "、".join(dup_dids))
+    owner: dict[str, str] = {}
+    for driver in drivers:
+        gid = driver.current_gid
+        if not gid:
+            continue
+        if gid in owner:
+            raise ValueError(f"在跑的配车单 {gid} 同时挂在 {owner[gid]} 和 {driver.did}")
+        owner[gid] = driver.did
+
+
 def greedy_assign(drivers: Sequence[Driver], groups: Sequence[Group], now: Optional[datetime] = None) -> Solution:
+    _require_unique(drivers, groups)
     _EXE_CACHE.clear()
     sol, rest = _seed_locked(drivers, groups)
     for group in sorted(rest, key=lambda g: (g.first.eta, g.gid)):

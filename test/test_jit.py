@@ -114,6 +114,14 @@ class JitDispatchTests(unittest.TestCase):
             places=2,
         )
 
+    def test_depart_is_not_before_decision_time(self):
+        driver = Driver("D2", 34.6639, 135.5019, datetime(2026, 9, 20, 14, 0))
+        group = _songji()
+        now = datetime(2026, 9, 20, 14, 30)
+        exe = execute_group(group, driver.lat, driver.lon, driver.free_at, driver=driver, now=now)
+        self.assertGreaterEqual(exe.depart, now)
+        self.assertLessEqual(exe.dispatch_at, exe.depart)
+
 
 if __name__ == "__main__":
     unittest.main()
