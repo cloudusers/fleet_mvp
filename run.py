@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from fleet_mvp.assign import GroupALNS, format_dispatch, greedy_assign
+from fleet_mvp.export_result import write_dispatch_xlsx
 from fleet_mvp.io_util import default_dataset
 
 
@@ -25,13 +26,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="接送机编组派单")
     parser.add_argument("--peak", action="store_true", help="用 groups_peak.json")
     parser.add_argument("--trap", action="store_true", help="贪心会占死人、ALNS 能救回来的对照数据")
+    parser.add_argument("--real", action="store_true", help="用 2026-09-22 线上配车生成的数据")
     parser.add_argument("--start", default=None, help="当前时刻，默认最早 free_at")
     parser.add_argument("--alns", action="store_true", help="贪心后再跑 ALNS")
     parser.add_argument("--iters", type=int, default=50)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args(argv)
+    if sum(bool(flag) for flag in (args.peak, args.trap, args.real)) > 1:
+        parser.error("peak、trap、real 只能选一个")
 
-    drivers, groups = default_dataset(peak=args.peak, trap=args.trap)
+    drivers, groups = default_dataset(peak=args.peak, trap=args.trap, real=args.real)
     now = _parse_dt(args.start)
     if now is None and drivers:
         now = min(d.free_at for d in drivers)
@@ -46,7 +50,9 @@ def main(argv: list[str] | None = None) -> int:
         print()
     else:
         sol = greedy_assign(drivers, groups, now=now)
-    print(format_dispatch(sol, now=now))
+    print(format_dispatch(sol, now=now), flush=True)
+    saved = write_dispatch_xlsx(sol, now=now)
+    print(f"运力表 {saved}", flush=True)
     return 0
 
 

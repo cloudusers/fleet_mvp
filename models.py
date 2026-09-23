@@ -4,13 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from fleet_mvp.config import (
-    DRIVER_ENROUTE,
-    DRIVER_IDLE,
-    KIND_FROM_STATION,
-    KIND_TO_STATION,
-    TRANSFER_STATION,
-)
+from fleet_mvp.config import DRIVER_ENROUTE, DRIVER_IDLE, KIND_TO_STATION, TRANSFER_STATION
 
 
 @dataclass
@@ -23,6 +17,8 @@ class Stop:
     eta: datetime
     late: datetime
     people: int
+    guest: str = ""
+    address: str = ""
 
 
 @dataclass
@@ -76,13 +72,6 @@ class Driver:
     def is_enroute(self) -> bool:
         return self.status == DRIVER_ENROUTE
 
-    def current_kind_label(self) -> str:
-        if self.current_kind == KIND_TO_STATION:
-            return "送机"
-        if self.current_kind == KIND_FROM_STATION:
-            return "接机"
-        return "待命"
-
     def dispatch_origin(self) -> Tuple[float, float, datetime]:
         # 空闲从 GPS 走；在跑的从本趟终点走。没到上班点就等到上班。
         if self.is_enroute():
@@ -110,20 +99,6 @@ class Driver:
         if ready > group.first.late:
             return False
         return True
-
-    def status_label(self) -> str:
-        if not self.on_shift:
-            return "下班，不参与派单"
-        shift = ""
-        if self.shift_start and self.shift_end:
-            shift = f" 班次{self.shift_start.strftime('%H:%M')}-{self.shift_end.strftime('%H:%M')}"
-        if self.is_enroute():
-            gid = self.current_gid or "?"
-            return (
-                f"运送中{self.current_kind_label()} {gid}，"
-                f"{self.free_at.strftime('%H:%M')} 到达本趟终点后可接下单{shift}"
-            )
-        return f"空闲 {self.free_at.strftime('%H:%M')}{shift}"
 
 
 @dataclass

@@ -91,10 +91,12 @@ def assignment_loss(exe, weights: LossWeights = DEFAULT_WEIGHTS) -> LossBreakdow
     )
 
 
-def solution_loss(sol, now=None, policy: str = "jit", weights: LossWeights = DEFAULT_WEIGHTS) -> LossBreakdown:
+def solution_loss(
+    sol, now=None, policy: str = "jit", weights: LossWeights = DEFAULT_WEIGHTS, need_latest: bool = True
+) -> LossBreakdown:
     from fleet_mvp.execute import simulate_solution
 
-    sim = simulate_solution(sol, now=now, policy=policy)
+    sim = simulate_solution(sol, now=now, policy=policy, need_latest=need_latest)
     if not sim.feasible:
         return LossBreakdown(infeasible=True)
     acc = LossBreakdown()
@@ -126,16 +128,7 @@ def execution_cost(exe, weights: LossWeights = DEFAULT_WEIGHTS) -> float:
     return assignment_loss(exe, weights).total
 
 
-def solution_cost(sol, now=None, policy: str = "jit", weights: LossWeights = DEFAULT_WEIGHTS) -> float:
-    return solution_loss(sol, now=now, policy=policy, weights=weights).total
-
-
-def formula_text(weights: LossWeights = DEFAULT_WEIGHTS) -> str:
-    return (
-        "L = "
-        f"{weights.empty_min:g}·空驶min + {weights.detour_km:g}·不顺路km + "
-        f"{weights.eta_delay_min:g}·各站晚于ETA + {weights.hotel_wait_min:g}·各站早到空等 + "
-        f"{weights.slack_risk_min:g}·松弛不足 + {weights.overtime_min:g}·加班min + "
-        f"{weights.unassigned_group:g}·未派组 + {weights.unassigned_person:g}·未派人数；"
-        "组内载客路线已固定不计入 L。不可行 L=∞。"
-    )
+def solution_cost(
+    sol, now=None, policy: str = "jit", weights: LossWeights = DEFAULT_WEIGHTS, need_latest: bool = True
+) -> float:
+    return solution_loss(sol, now=now, policy=policy, weights=weights, need_latest=need_latest).total

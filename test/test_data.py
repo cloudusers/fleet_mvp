@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import unittest
+from datetime import timedelta
 
-from fleet_mvp.config import KIND_FROM_STATION, KIND_TO_STATION
+from fleet_mvp.config import KIND_FROM_STATION, KIND_TO_STATION, LATE_SLACK_MIN
 from fleet_mvp.io_util import data_dir, default_dataset, load_drivers
 
 
@@ -43,6 +44,32 @@ class DatasetTests(unittest.TestCase):
         self._assert_groups_ok(trap, "trap")
         self.assertEqual(len(drivers), 2)
         self.assertEqual({g.gid for g in trap}, {"T01", "T02"})
+
+    def test_real_0922_dataset_matches_dispatch_export(self):
+        drivers, groups = default_dataset(real=True)
+        self.assertEqual(len(drivers), 26)
+        self.assertEqual(len({d.did for d in drivers}), 26)
+        self.assertEqual(len(groups), 156)
+        self._assert_groups_ok(groups, "real")
+        songji = [g for g in groups if g.is_to_station()]
+        jieji = [g for g in groups if not g.is_to_station()]
+        self.assertEqual(len(songji), 85)
+        self.assertEqual(len(jieji), 71)
+        self.assertEqual(sum(len(g.stops) for g in groups), 318)
+        for driver in drivers:
+            self.assertTrue(driver.name)
+            self.assertTrue(driver.plate)
+            self.assertTrue(driver.on_shift)
+            self.assertAlmostEqual(driver.lat, 34.66138766837743, places=5)
+        sample = next(g for g in groups if g.gid == "M2026092215470001")
+        self.assertTrue(sample.is_to_station())
+        self.assertIn("宋丕伟", sample.note)
+        self.assertEqual(sample.stops[0].oid, "S2026092118360001")
+        self.assertIn("KIM", sample.stops[0].guest)
+        self.assertTrue(sample.stops[0].address)
+        self.assertEqual(sample.stops[0].people, 2)
+        self.assertEqual(sample.stops[0].eta.isoformat(), "2026-09-22T21:52:36")
+        self.assertEqual(sample.stops[0].late, sample.stops[0].eta + timedelta(minutes=LATE_SLACK_MIN))
 
     def _assert_groups_ok(self, groups, label: str):
         gids = [g.gid for g in groups]

@@ -33,8 +33,8 @@ def _apply_shift_end(driver: Optional[Driver], exe: GroupExecution) -> GroupExec
         exe.overtime = True
         exe.overtime_min = (exe.end_at - driver.shift_end).total_seconds() / 60.0
         exe.reason = (
-            f"加班：预计 {exe.end_at.strftime('%H:%M')} 收车，"
-            f"下班 {driver.shift_end.strftime('%H:%M')}，超时 {exe.overtime_min:.0f} 分钟"
+            f"加班：预计 {exe.end_at.strftime('%m-%d %H:%M')} 收车，"
+            f"下班 {driver.shift_end.strftime('%m-%d %H:%M')}，超时 {exe.overtime_min:.0f} 分钟"
         )
     return exe
 
@@ -100,14 +100,14 @@ def _walk_guest_stops(stops: Sequence[Stop], arrive_first: datetime, dwell_min: 
     )
 
 
-def _latest_ok(ok, lo: datetime, hi: datetime) -> datetime:
-    # 越晚越难，二分最晚可发。
+def _latest_ok(ok, lo: datetime, hi: datetime) -> Optional[datetime]:
+    # 越晚越难。窗口里没有可行出发点时返回空，避免写出一个其实走不了的时刻。
     if hi < lo:
         hi = lo
+    if not ok(lo):
+        return None
     if ok(hi):
         return hi
-    if not ok(lo):
-        return lo
     for _ in range(24):
         mid = lo + (hi - lo) / 2
         if ok(mid):
@@ -129,8 +129,16 @@ def _dispatch_clock(depart, free_at, now):
     return dispatch_at
 
 
-def execute_to_station(group: Group, olat: float, olon: float, free_at: datetime, now=None, policy="jit") -> GroupExecution:
-    # origin → 酒店… → T，收车在 T
+def execute_to_station(
+    group: Group,
+    olat: float,
+    olon: float,
+    free_at: datetime,
+    now=None,
+    policy="jit",
+    need_latest: bool = True,
+) -> GroupExecution:
+    # origin → 酒店… → T，收车在 T。need_latest 只服务最终输出，搜索时关掉。
     first = group.first
     empty_min = travel_minutes(olat, olon, first.lat, first.lon)
     empty_km = haversine_km(olat, olon, first.lat, first.lon)
@@ -140,13 +148,16 @@ def execute_to_station(group: Group, olat: float, olon: float, free_at: datetime
             group.stops, add_minutes(depart, empty_min), PICKUP_DWELL_MIN
         ).feasible
 
-    lo = min(free_at, add_minutes(first.eta, -empty_min)) - timedelta(hours=2)
-    hi = add_minutes(first.late, -empty_min)
-    latest_depart = _latest_ok(_ok, lo, hi)
+    if need_latest:
+        lo = min(free_at, add_minutes(first.eta, -empty_min)) - timedelta(hours=2)
+        hi = add_minutes(first.late, -empty_min)
+        latest_depart = _latest_ok(_ok, lo, hi)
+    else:
+        latest_depart = None
     ideal_depart = add_minutes(first.eta, -empty_min)
     depart = free_at if policy == "immediate" else max(free_at, ideal_depart)
-    if not _ok(depart):
-        return _fail(f"出发后仍赶不上本组全程接客", latest_depart)
+    if need_latest and not _ok(depart):
+        return _fail("出发后仍赶不上本组全程接客", latest_depart)
 
     arrive = add_minutes(depart, empty_min)
     walked = _walk_guest_stops(group.stops, arrive, PICKUP_DWELL_MIN)
@@ -180,8 +191,16 @@ def execute_to_station(group: Group, olat: float, olon: float, free_at: datetime
     )
 
 
-def execute_from_station(group: Group, olat: float, olon: float, free_at: datetime, now=None, policy="jit") -> GroupExecution:
-    # origin → T → 酒店…，收车在末户
+def execute_from_station(
+    group: Group,
+    olat: float,
+    olon: float,
+    free_at: datetime,
+    now=None,
+    policy="jit",
+    need_latest: bool = True,
+) -> GroupExecution:
+    # origin → T → 酒店…，收车在末户。need_latest 只服务最终输出，搜索时关掉。
     tlat, tlon = TRANSFER_STATION
     empty_min = travel_minutes(olat, olon, tlat, tlon)
     empty_km = haversine_km(olat, olon, tlat, tlon)
@@ -189,16 +208,19 @@ def execute_from_station(group: Group, olat: float, olon: float, free_at: dateti
     to_first = travel_minutes(tlat, tlon, first.lat, first.lon)
     ideal_leave_t = add_minutes(first.eta, -to_first - STATION_LOAD_MIN)
 
-    def _from_origin(origin_depart: datetime) -> _Walk:
-        arrive_t = add_minutes(origin_depart, empty_min)
-        leave_t = add_minutes(arrive_t, STATION_LOAD_MIN)
-        return _walk_guest_stops(
-            group.stops, add_minutes(leave_t, to_first), DROPOFF_DWELL_MIN
-        )
+    if need_latest:
+        def _from_origin(origin_depart: datetime) -> _Walk:
+            arrive_t = add_minutes(origin_depart, empty_min)
+            leave_t = add_minutes(arrive_t, STATION_LOAD_MIN)
+            return _walk_guest_stops(
+                group.stops, add_minutes(leave_t, to_first), DROPOFF_DWELL_MIN
+            )
 
-    lo = free_at - timedelta(hours=2)
-    hi = add_minutes(first.late, -to_first - STATION_LOAD_MIN - empty_min)
-    latest_depart = _latest_ok(lambda d: _from_origin(d).feasible, lo, hi)
+        lo = free_at - timedelta(hours=2)
+        hi = add_minutes(first.late, -to_first - STATION_LOAD_MIN - empty_min)
+        latest_depart = _latest_ok(lambda d: _from_origin(d).feasible, lo, hi)
+    else:
+        latest_depart = None
 
     if policy == "immediate":
         depart = free_at
@@ -245,6 +267,7 @@ def execute_group(
     driver: Optional[Driver] = None,
     now: Optional[datetime] = None,
     policy: str = "jit",
+    need_latest: bool = True,
 ) -> GroupExecution:
     if not group.stops:
         return _fail("空分组")
@@ -252,15 +275,21 @@ def execute_group(
         if not driver.on_shift:
             return _fail("下班，不参与派单")
     if group.is_to_station():
-        exe = execute_to_station(group, origin_lat, origin_lon, free_at, now=now, policy=policy)
+        exe = execute_to_station(
+            group, origin_lat, origin_lon, free_at, now=now, policy=policy, need_latest=need_latest
+        )
     else:
-        exe = execute_from_station(group, origin_lat, origin_lon, free_at, now=now, policy=policy)
+        exe = execute_from_station(
+            group, origin_lat, origin_lon, free_at, now=now, policy=policy, need_latest=need_latest
+        )
     return _apply_shift_end(driver, exe)
 
 
-def execute_for_driver(group: Group, driver: Driver, now=None, policy: str = "jit") -> GroupExecution:
+def execute_for_driver(
+    group: Group, driver: Driver, now=None, policy: str = "jit", need_latest: bool = True
+) -> GroupExecution:
     lat, lon, t = driver.dispatch_origin()
-    return execute_group(group, lat, lon, t, driver=driver, now=now, policy=policy)
+    return execute_group(group, lat, lon, t, driver=driver, now=now, policy=policy, need_latest=need_latest)
 
 
 def _locked_in_progress(driver: Driver) -> GroupExecution:
@@ -285,6 +314,7 @@ def simulate_driver_plan(
     now: Optional[datetime] = None,
     policy: str = "jit",
     locked_gids: Optional[Sequence[str]] = None,
+    need_latest: bool = True,
 ) -> DriverSim:
     lat, lon, t = plan.driver.dispatch_origin()
     locked = set(locked_gids or [])
@@ -293,7 +323,9 @@ def simulate_driver_plan(
         if i == 0 and group.gid in locked:
             exe = _locked_in_progress(plan.driver)
         else:
-            exe = execute_group(group, lat, lon, t, driver=plan.driver, now=now, policy=policy)
+            exe = execute_group(
+                group, lat, lon, t, driver=plan.driver, now=now, policy=policy, need_latest=need_latest
+            )
         if not exe.feasible:
             return DriverSim(did=plan.driver.did, feasible=False, executions=execs, reason=exe.reason)
         execs.append(exe)
@@ -310,10 +342,14 @@ def simulate_driver_plan(
     )
 
 
-def simulate_solution(sol: Solution, now: Optional[datetime] = None, policy: str = "jit") -> SolutionSim:
+def simulate_solution(
+    sol: Solution, now: Optional[datetime] = None, policy: str = "jit", need_latest: bool = True
+) -> SolutionSim:
     sims: List[DriverSim] = []
     for plan in sol.plans:
-        ds = simulate_driver_plan(plan, now=now, policy=policy, locked_gids=sol.locked_gids)
+        ds = simulate_driver_plan(
+            plan, now=now, policy=policy, locked_gids=sol.locked_gids, need_latest=need_latest
+        )
         if not ds.feasible:
             return SolutionSim(
                 feasible=False,

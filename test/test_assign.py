@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 from datetime import datetime
 
-from fleet_mvp.assign import GroupALNS, greedy_assign, rank_candidates
+import tempfile
+from pathlib import Path
+
+from openpyxl import load_workbook
+
+from fleet_mvp.assign import GroupALNS, format_dispatch, greedy_assign, rank_candidates, search_cost
+from fleet_mvp.export_result import write_dispatch_xlsx
 from fleet_mvp.execute import simulate_solution
 from fleet_mvp.io_util import default_dataset
 from fleet_mvp.loss import solution_cost
@@ -107,6 +113,50 @@ class AssignTests(unittest.TestCase):
         self.assertTrue(songji_jieji or jieji_songji, msg="白天轮换应出现空驶≈0 的衔接")
         mixed_empty = [km for *_, km in songji_jieji + jieji_songji]
         self.assertLess(min(mixed_empty), 0.2)
+
+    def test_search_cost_matches_full_loss(self):
+        drivers, groups = default_dataset()
+        now = min(d.free_at for d in drivers)
+        sol = greedy_assign(drivers, groups, now=now)
+        self.assertAlmostEqual(search_cost(sol, now=now), solution_cost(sol, now=now), places=5)
+        drivers, groups = default_dataset(peak=True)
+        start = datetime(2026, 9, 20, 14, 0)
+        peak = greedy_assign(drivers, groups, now=start)
+        self.assertGreater(len(peak.unassigned), 0)
+        self.assertAlmostEqual(search_cost(peak, now=start), solution_cost(peak, now=start), places=5)
+
+    def test_destroy_weights_follow_scores(self):
+        drivers, groups = default_dataset(trap=True)
+        alns = GroupALNS(drivers, groups, max_iter=1, seed=1)
+        alns._uses = [4, 0, 1]
+        alns._scores = [20.0, 0.0, 0.0]
+        alns._adapt_weights()
+        self.assertGreater(alns.w_destroy[0], 1.0)
+        self.assertGreater(alns.w_destroy[0], alns.w_destroy[2])
+        self.assertEqual(alns.w_destroy[1], 1.0)
+        self.assertEqual(alns._uses, [0, 0, 0])
+        self.assertGreaterEqual(min(alns.w_destroy), 0.05)
+
+    def test_dispatch_log_and_workbook_name_the_driver(self):
+        drivers, groups = default_dataset(trap=True)
+        sol = greedy_assign(drivers, groups)
+        text = format_dispatch(sol)
+        self.assertIn("佐藤", text)
+        self.assertIn("车号", text)
+        self.assertIn("T02", text)
+        with tempfile.TemporaryDirectory() as folder:
+            first = write_dispatch_xlsx(sol, directory=Path(folder))
+            second = write_dispatch_xlsx(sol, directory=Path(folder))
+            self.assertNotEqual(first.name, second.name)
+            self.assertTrue(first.exists())
+            self.assertTrue(second.exists())
+            sheet = load_workbook(first).active
+            header = [cell.value for cell in sheet[1]]
+            self.assertEqual(header[0], "司机")
+            self.assertIn("配车单号", header)
+            self.assertIn("地址", header)
+            names = [row[0] for row in sheet.iter_rows(min_row=2, values_only=True)]
+            self.assertIn("佐藤", names)
 
     def test_jieji_then_same_hotel_songji_has_zero_empty(self):
         drivers, groups = default_dataset()

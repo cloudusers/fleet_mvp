@@ -14,4 +14,5 @@ PICKUP_DWELL_MIN = 3.0
 DROPOFF_DWELL_MIN = 5.0
 STATION_LOAD_MIN = 3.0  # 站内上车
 PREP_BUFFER_MIN = 5.0  # 发单比出发早这么多
+LATE_SLACK_MIN = 10.0  # 线上单没有最晚时刻时，late = 预估时刻 + 这段
 AT_TRANSFER_KM = 0.4  # 小于这个距离算已在 T

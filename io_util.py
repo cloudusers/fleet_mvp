@@ -67,6 +67,8 @@ def load_groups(path: Union[str, Path]) -> List[Group]:
                     eta=_parse_dt(s["eta"]),
                     late=_parse_dt(s["late"]),
                     people=int(s["people"]),
+                    guest=str(s.get("guest", "")),
+                    address=str(s.get("address", "")),
                 )
             )
         if not stops:
@@ -79,7 +81,17 @@ def data_dir() -> Path:
     return Path(__file__).resolve().parent / "data"
 
 
-def default_dataset(peak: bool = False, trap: bool = False) -> Tuple[List[Driver], List[Group]]:
+def default_dataset(
+    peak: bool = False, trap: bool = False, real: bool = False
+) -> Tuple[List[Driver], List[Group]]:
+    picked = [name for name, flag in (("peak", peak), ("trap", trap), ("real", real)) if flag]
+    if len(picked) > 1:
+        raise ValueError("peak、trap、real 只能选一个")
+    if real:
+        return (
+            load_drivers(data_dir() / "drivers_0922.json"),
+            load_groups(data_dir() / "groups_0922.json"),
+        )
     if trap:
         return (
             load_drivers(data_dir() / "drivers_trap.json"),
