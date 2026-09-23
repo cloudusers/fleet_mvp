@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from datetime import timedelta
+from pathlib import Path
 
 from fleet_mvp.config import KIND_FROM_STATION, KIND_TO_STATION, LATE_SLACK_MIN
-from fleet_mvp.io_util import data_dir, default_dataset, load_drivers
+from fleet_mvp.io_util import data_dir, default_dataset, load_drivers, load_groups
 
 
 class DatasetTests(unittest.TestCase):
@@ -70,6 +73,13 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(sample.stops[0].people, 2)
         self.assertEqual(sample.stops[0].eta.isoformat(), "2026-09-22T21:52:36")
         self.assertEqual(sample.stops[0].late, sample.stops[0].eta + timedelta(minutes=LATE_SLACK_MIN))
+
+    def test_group_without_stops_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "groups.json"
+            path.write_text(json.dumps([{"gid": "EMPTY", "kind": "to_station", "stops": []}]), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_groups(path)
 
     def _assert_groups_ok(self, groups, label: str):
         gids = [g.gid for g in groups]

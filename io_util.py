@@ -72,7 +72,7 @@ def load_groups(path: Union[str, Path]) -> List[Group]:
                 )
             )
         if not stops:
-            continue
+            raise ValueError(f"配车单 {row.get('gid')} 没有客人，不能丢掉")
         groups.append(Group(gid=str(row["gid"]), kind=kind, stops=stops, note=str(row.get("note", ""))))
     return groups
 

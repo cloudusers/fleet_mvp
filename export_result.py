@@ -38,14 +38,16 @@ def result_dir() -> Path:
     return Path(__file__).resolve().parent / "result"
 
 
-def _new_path(directory: Path) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
+def allocate_result_stem(directory: Optional[Path] = None) -> Path:
+    # 运力表和对比文档共用这一段文件名，只是后缀不同。
+    folder = Path(directory) if directory is not None else result_dir()
+    folder.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = directory / f"运力派单-{stamp}.xlsx"
-    if path.exists():
+    stem = folder / f"运力派单-{stamp}"
+    if stem.with_suffix(".xlsx").exists() or stem.with_suffix(".md").exists():
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-        path = directory / f"运力派单-{stamp}.xlsx"
-    return path
+        stem = folder / f"运力派单-{stamp}"
+    return stem
 
 
 def _action(group: Group) -> str:
@@ -56,7 +58,7 @@ def _rows(sol: Solution, now: Optional[datetime]):
     sim = simulate_solution(sol, now=now, policy="jit")
     rows = []
     if not sim.feasible:
-        return rows
+        raise ValueError(f"方案不可行，不写空表：{sim.reason}")
     exe_by_driver = {ds.did: ds for ds in sim.driver_sims}
     for plan in sol.plans:
         ds = exe_by_driver.get(plan.driver.did)
@@ -110,9 +112,15 @@ def _rows(sol: Solution, now: Optional[datetime]):
 
 
 def write_dispatch_xlsx(
-    sol: Solution, now: Optional[datetime] = None, directory: Optional[Path] = None
+    sol: Solution,
+    now: Optional[datetime] = None,
+    directory: Optional[Path] = None,
+    path: Optional[Path] = None,
 ) -> Path:
-    path = _new_path(Path(directory) if directory is not None else result_dir())
+    if path is None:
+        path = allocate_result_stem(directory).with_suffix(".xlsx")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
     book = Workbook()
     sheet = book.active
     sheet.title = "运力派单"

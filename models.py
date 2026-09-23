@@ -87,15 +87,13 @@ class Driver:
         return tlat, tlon, t
 
     def consider_for(self, group: "Group") -> bool:
-        # 下班 / 已过下班 / 首客 ETA 过了下班 / 赶不上 late → 不进候选
+        # 下班、可出发时刻已到下班、可出发时刻已晚于首客 late，不进候选。
+        # 首客预估在下班之后不在这里挡：出发还在班内、收车超时，执行里记加班。
         if not self.on_shift:
             return False
         _lat, _lon, ready = self.dispatch_origin()
-        if self.shift_end is not None:
-            if ready >= self.shift_end:
-                return False
-            if group.first.eta >= self.shift_end:
-                return False
+        if self.shift_end is not None and ready >= self.shift_end:
+            return False
         if ready > group.first.late:
             return False
         return True

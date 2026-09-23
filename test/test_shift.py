@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime
 
 from fleet_mvp.assign import greedy_assign
-from fleet_mvp.execute import execute_for_driver
+from fleet_mvp.execute import execute_for_driver, simulate_solution
 from fleet_mvp.loss import assignment_loss
 from fleet_mvp.models import Driver, Group, Stop
 
@@ -68,8 +68,16 @@ class ShiftGateTests(unittest.TestCase):
             shift_start=datetime(2026, 9, 20, 17, 0),
             shift_end=datetime(2026, 9, 20, 22, 0),
         )
-        self.assertFalse(morning.consider_for(group))
+        self.assertTrue(morning.consider_for(group))
         self.assertTrue(night.consider_for(group))
+        missed = execute_for_driver(group, morning)
+        self.assertFalse(missed.feasible)
+        self.assertIn("下班", missed.reason)
+        sol = greedy_assign([morning, night], [group])
+        night_plan = next(p for p in sol.plans if p.driver.did == "D8")
+        morning_plan = next(p for p in sol.plans if p.driver.did == "D1")
+        self.assertEqual([g.gid for g in night_plan.groups], ["J32"])
+        self.assertEqual(morning_plan.groups, [])
 
     def test_greedy_skips_off_duty_and_assigns_on_duty(self):
         group = _songji()
@@ -120,6 +128,38 @@ class ShiftGateTests(unittest.TestCase):
         d7 = next(p for p in sol.plans if p.driver.did == "D7")
         self.assertEqual([g.gid for g in d2.groups], ["G02"])
         self.assertEqual(d7.groups, [])
+
+    def test_eta_after_shift_end_stays_when_depart_is_on_shift(self):
+        group = Group(
+            gid="LATE",
+            kind="to_station",
+            stops=[
+                Stop(
+                    "S",
+                    "难波",
+                    34.6639,
+                    135.5019,
+                    datetime(2026, 9, 20, 14, 40),
+                    datetime(2026, 9, 20, 15, 0),
+                    1,
+                )
+            ],
+        )
+        driver = Driver(
+            "D7",
+            34.70,
+            135.30,
+            datetime(2026, 9, 20, 13, 0),
+            shift_start=datetime(2026, 9, 20, 8, 0),
+            shift_end=datetime(2026, 9, 20, 14, 30),
+        )
+        self.assertTrue(driver.consider_for(group))
+        sol = greedy_assign([driver], [group])
+        self.assertEqual(sol.unassigned, [])
+        sim = simulate_solution(sol)
+        exe = sim.driver_sims[0].executions[0]
+        self.assertTrue(exe.overtime)
+        self.assertLess(exe.depart, driver.shift_end)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from fleet_mvp.assign import GroupALNS, format_dispatch, greedy_assign
-from fleet_mvp.export_result import write_dispatch_xlsx
+from fleet_mvp.compare_result import write_real_comparison
+from fleet_mvp.export_result import allocate_result_stem, write_dispatch_xlsx
 from fleet_mvp.io_util import default_dataset
 
 
@@ -45,14 +46,40 @@ def main(argv: list[str] | None = None) -> int:
     searcher = "ALNS" if args.alns else "贪心"
     print(f"司机 {len(drivers)}  编组 {len(groups)}（送机 {n_songji} / 接机 {n_jieji}）  搜索：{searcher}")
 
+    greedy_sol = greedy_assign(drivers, groups, now=now) if args.real else None
     if args.alns:
         sol = GroupALNS(drivers, groups, max_iter=args.iters, seed=args.seed, now=now).run(verbose=True)
         print()
+    elif greedy_sol is not None:
+        sol = greedy_sol
     else:
         sol = greedy_assign(drivers, groups, now=now)
     print(format_dispatch(sol, now=now), flush=True)
-    saved = write_dispatch_xlsx(sol, now=now)
-    print(f"运力表 {saved}", flush=True)
+    if args.real:
+        stem = allocate_result_stem()
+        saved = write_dispatch_xlsx(sol, now=now, path=stem.with_suffix(".xlsx"))
+        if args.alns:
+            alns_sol = sol
+        else:
+            print(f"对比文档再跑 ALNS {args.iters} 轮", flush=True)
+            alns_sol = GroupALNS(drivers, groups, max_iter=args.iters, seed=args.seed, now=now).run(verbose=False)
+        compared = write_real_comparison(
+            stem.with_suffix(".md"),
+            drivers,
+            groups,
+            greedy_sol,
+            alns_sol,
+            now,
+            iters=args.iters,
+            seed=args.seed,
+            xlsx_name=saved.name,
+            xlsx_mode="ALNS" if args.alns else "贪心",
+        )
+        print(f"运力表 {saved}", flush=True)
+        print(f"对比 {compared}", flush=True)
+    else:
+        saved = write_dispatch_xlsx(sol, now=now)
+        print(f"运力表 {saved}", flush=True)
     return 0
 
 

@@ -225,7 +225,7 @@ def _seed_locked(drivers: Sequence[Driver], groups: Sequence[Group]) -> Tuple[So
     used = set()
     for plan in sol.plans:
         gid = plan.driver.current_gid
-        if gid and gid in by_id:
+        if plan.driver.is_enroute() and gid and gid in by_id:
             plan.groups.append(by_id[gid])
             locked.append(gid)
             used.add(gid)
@@ -248,6 +248,11 @@ def _require_unique(drivers: Sequence[Driver], groups: Sequence[Group]) -> None:
         gid = driver.current_gid
         if not gid:
             continue
+        if not driver.is_enroute():
+            raise ValueError(
+                f"司机 {driver.did} 是空闲状态，却带了在跑配车单 {gid}。"
+                "在跑要标成 enroute，并给出本趟终点"
+            )
         if gid in owner:
             raise ValueError(f"在跑的配车单 {gid} 同时挂在 {owner[gid]} 和 {driver.did}")
         owner[gid] = driver.did

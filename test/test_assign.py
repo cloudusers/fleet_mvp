@@ -177,6 +177,9 @@ class AssignTests(unittest.TestCase):
         second = replace(drivers[1], **busy)
         with self.assertRaises(ValueError):
             greedy_assign([first, second], [groups[0]])
+        idle = replace(drivers[0], current_gid=groups[0].gid, status="idle")
+        with self.assertRaises(ValueError):
+            greedy_assign([idle], [groups[0]])
 
 
 if __name__ == "__main__":
